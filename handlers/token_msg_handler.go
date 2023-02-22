@@ -74,10 +74,10 @@ func (t *TokenMessageHandler) ReplyText() error {
 		if !t.msg.IsAt() {
 			return err
 		}
-		atText := "@" + t.sender.NickName + "上下文已经清空，请问下个问题"
+		atText := "@" + t.sender.NickName + "strongant 自费购买了ChatGPT Plus 服务，已使用GPT3.5模型，上下文已经清空，请问下个问题！"
 		_, err = t.msg.ReplyText(atText)
 	} else {
-		_, err = t.msg.ReplyText("上下文已经清空，请问下个问题")
+		_, err = t.msg.ReplyText("strongant 自费购买了ChatGPT Plus 服务，已使用GPT3.5模型，上下文已经清空，请问下个问题！")
 	}
 	return err
 }

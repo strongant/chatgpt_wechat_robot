@@ -106,7 +106,7 @@ $ go run main.go
   "auto_pass": true,                # 是否自动通过好友添加
   "session_timeout": 60,            # 会话超时时间，默认60秒，单位秒，在会话时间内所有发送给机器人的信息会作为上下文
   "max_tokens": 1024,               # GPT响应字符数，最大2048，默认值512。会影响接口响应速度，字符越大响应越慢
-  "model": "text-davinci-003",      # GPT选用模型，默认text-davinci-003，具体选项参考官网训练场
+  "model": "text-davinci-003",      # GPT选用模型，默认text-davinci-003，具体选项参考官网训练场 text-davinci-002-render-paid
   "temperature": 1,                 # GPT热度，0到1，默认0.9，数字越大创造力越强，但更偏离训练事实，越低越接近训练事实
   "reply_prefix": "来自机器人回复：", # 私聊回复前缀
   "session_clear_token": "清空会话"  # 会话清空口令，默认`下一个问题`

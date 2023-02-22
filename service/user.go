@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/qingconglaixueit/wechatbot/config"
 	"github.com/eatmoreapple/openwechat"
 	"github.com/patrickmn/go-cache"
+	"github.com/qingconglaixueit/wechatbot/config"
 	"time"
 )
 
@@ -57,6 +57,6 @@ func (s *UserService) GetUserSessionContext() string {
 
 // SetUserSessionContext 设置用户会话上下文文本，question用户提问内容，GTP回复内容
 func (s *UserService) SetUserSessionContext(question, reply string) {
-	value := question + "\n" + reply
+	value := question + "  " + reply
 	s.cache.Set(s.user.ID(), value, time.Second*config.LoadConfig().SessionTimeout)
 }
