@@ -157,8 +157,9 @@ func (g *GroupMessageHandler) ReplyText() error {
 		// don't worry about errors
 		response, e := http.Get(imgData.Data[0].URL)
 		if e != nil {
-			log.Fatal(e)
+			return fmt.Errorf("reply group error: %v ", err)
 		}
+
 		defer response.Body.Close()
 
 		uid := uuid.New().String()
@@ -166,7 +167,7 @@ func (g *GroupMessageHandler) ReplyText() error {
 		//open a file for writing
 		file, err := os.Create("/tmp/"+uid+".png")
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("create image error: %v ", err)
 		}
 		defer file.Close()
 
@@ -177,13 +178,14 @@ func (g *GroupMessageHandler) ReplyText() error {
 		// Use io.Copy to just dump the response body to the file. This supports huge files
 		_, err = io.Copy(file, response.Body)
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("generate image error: %v ", err)
 		}
+
 		fmt.Println("Success!")
 
 		fi, err := os.Open("/tmp/"+uid+".png")
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("Open image error: %v ", err)
 		}
 		defer fi.Close()
 
