@@ -227,18 +227,18 @@ func searchReturnImage(requestText string, err error) []byte {
   }`)
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/images/generations", data)
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("http.NewRequest: %v", err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+config.LoadConfig().ApiKey+"")
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("client.Do: %v", err))
 	}
 	defer resp.Body.Close()
 	bodyText, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("io.ReadAll: %v", err))
 	}
 	return bodyText
 }
@@ -319,7 +319,7 @@ func searchByKeyWords(q string) bytes.Buffer {
 	var data = strings.NewReader(fullQ)
 	req, err := http.NewRequest("POST", "https://chat.openai.com/backend-api/conversation", data)
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("http.NewRequest: %v", err))
 	}
 	req.Header.Set("authority", "chat.openai.com")
 	req.Header.Set("accept", "text/event-stream")
@@ -339,12 +339,12 @@ func searchByKeyWords(q string) bytes.Buffer {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("http: %v", err))
 	}
 	defer resp.Body.Close()
 	bodyText, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal(err)
+		logger.Warning(fmt.Sprintf("http: %v", err))
 	}
 
 	content := string(bodyText)
