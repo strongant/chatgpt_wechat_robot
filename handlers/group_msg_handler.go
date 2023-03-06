@@ -150,7 +150,7 @@ func (g *GroupMessageHandler) ReplyText() error {
 
 		len := len(imgData.Data)
 		if len <= 0 {
-			return fmt.Errorf("searchReturnImage error: %v ", imgData.Data)
+			return fmt.Errorf("searchReturnImage error: %v ", bodyText)
 		}
 
 		fmt.Println(imgData.Data[0].URL)
