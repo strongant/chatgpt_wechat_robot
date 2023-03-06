@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/eatmoreapple/openwechat"
+	"github.com/google/uuid"
+	"github.com/qingconglaixueit/wechatbot/config"
 	"github.com/qingconglaixueit/wechatbot/pkg/logger"
 	"github.com/qingconglaixueit/wechatbot/service"
 	"io"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +33,15 @@ type GroupMessageHandler struct {
 	sender *openwechat.User
 	// 实现的用户业务
 	service service.UserServiceInterface
+}
+
+type Image struct {
+	URL string `json:"url"`
+}
+
+type ImageData struct {
+	Created int64    `json:"created"`
+	Data    []Image `json:"data"`
 }
 
 func GroupMessageContextHandler() func(ctx *openwechat.MessageContext) {
@@ -104,6 +116,11 @@ func (g *GroupMessageHandler) ReplyText() error {
 		return nil
 	}
 
+	// 1.1.清空会话的不处理
+	if strings.Contains(g.getRequestText(),config.LoadConfig().SessionClearToken) {
+		return nil
+	}
+
 	// 2.获取请求的文本，如果为空字符串不处理
 	requestText := g.getRequestText()
 	if requestText == "" {
@@ -118,22 +135,70 @@ func (g *GroupMessageHandler) ReplyText() error {
 
 
 	log.Println("GPTPlus requestText:" + requestText)
+
+	if strings.Contains(requestText,"img") {
+		bodyText := searchReturnImage(requestText, err)
+		fmt.Printf("%s", bodyText)
+
+
+		var imgData ImageData
+		err := json.Unmarshal([]byte(bodyText), &imgData)
+		if err != nil {
+			fmt.Println(err)
+			return nil
+		}
+
+		fmt.Println(imgData.Data[0].URL)
+
+		// don't worry about errors
+		response, e := http.Get(imgData.Data[0].URL)
+		if e != nil {
+			log.Fatal(e)
+		}
+		defer response.Body.Close()
+
+		uid := uuid.New().String()
+
+		//open a file for writing
+		file, err := os.Create("/tmp/"+uid+".png")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+
+
+
+
+
+		// Use io.Copy to just dump the response body to the file. This supports huge files
+		_, err = io.Copy(file, response.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Success!")
+
+		fi, err := os.Open("/tmp/"+uid+".png")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer fi.Close()
+
+		name:= fi.Name()
+		log.Println(name)
+
+		_, err = g.msg.ReplyImage(fi)
+		if err != nil {
+			return fmt.Errorf("reply group error: %v ", err)
+		}
+
+		return nil
+	}
+
+
 	buffer := searchByKeyWords(requestText)
 
 	reply = buffer.String()
 	log.Println("GPTPlus 返回内容:" + reply)
-
-	//if err != nil {
-	//	text := err.Error()
-	//	if strings.Contains(err.Error(), "context deadline exceeded") {
-	//		text = deadlineExceededText
-	//	}
-	//	_, err = g.msg.ReplyText(text)
-	//	if err != nil {
-	//		return fmt.Errorf("reply group error: %v", err)
-	//	}
-	//	return err
-	//}
 
 	// 4.设置上下文，并响应信息给用户
 	g.service.SetUserSessionContext(requestText, reply)
@@ -144,6 +209,32 @@ func (g *GroupMessageHandler) ReplyText() error {
 
 	// 5.返回错误信息
 	return err
+}
+
+func searchReturnImage(requestText string, err error) []byte {
+
+	client := &http.Client{}
+	var data = strings.NewReader(`{
+    "prompt": "` + requestText + `",
+    "n": 1,
+    "size": "1024x1024"
+  }`)
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/images/generations", data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer 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")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	bodyText, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bodyText
 }
 
 // getRequestText 获取请求接口的文本，要做一些清洗
@@ -215,7 +306,9 @@ func searchByKeyWords(q string) bytes.Buffer {
 
 	client := &http.Client{}
 
-	fullQ := `{"action":"next","messages":[{"id":"1c06429f-7cfa-4e92-b785-ea978cf77871","author":{"role":"user"},"role":"user","content":{"content_type":"text","parts":["`+q+`"]}}],"parent_message_id":"b8acf723-ccc7-43c6-bec3-5fd3effb9542","model":"text-davinci-002-render-paid"}`
+	log.Println("search q:" + q)
+
+	fullQ := `{"action":"next","messages":[{"id":"1b91162e-e040-4436-b9b7-e1f6912b3117","author":{"role":"user"},"role":"user","content":{"content_type":"text","parts":["`+q+`"]}}],"conversation_id":"f0b4e553-5a5e-481e-bc07-bd1726f99ffd","parent_message_id":"ef90cd10-4898-4592-8f94-da1ae8a05a5d","model":"text-davinci-002-render-paid"}`
 	log.Println("fullQ:" + fullQ)
 	var data = strings.NewReader(fullQ)
 	req, err := http.NewRequest("POST", "https://chat.openai.com/backend-api/conversation", data)
@@ -227,16 +320,16 @@ func searchByKeyWords(q string) bytes.Buffer {
 	req.Header.Set("accept-language", "en,lb;q=0.9,gd;q=0.8,zh-CN;q=0.7,zh;q=0.6")
 	req.Header.Set("authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ik1UaEVOVUpHTkVNMVFURTRNMEZCTWpkQ05UZzVNRFUxUlRVd1FVSkRNRU13UmtGRVFrRXpSZyJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJzdHJvbmdhbnQxOTk0QGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJnZW9pcF9jb3VudHJ5IjoiU0cifSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7InVzZXJfaWQiOiJ1c2VyLVZoaTI4czZiVkNValc1Vkx3VWdTZnZoNiJ9LCJpc3MiOiJodHRwczovL2F1dGgwLm9wZW5haS5jb20vIiwic3ViIjoiYXV0aDB8NjM4ZWE4ZGEzZTExZmUwMDhmM2Q4NWY0IiwiYXVkIjpbImh0dHBzOi8vYXBpLm9wZW5haS5jb20vdjEiLCJodHRwczovL29wZW5haS5vcGVuYWkuYXV0aDBhcHAuY29tL3VzZXJpbmZvIl0sImlhdCI6MTY3NzUwNDA2NiwiZXhwIjoxNjc4NzEzNjY2LCJhenAiOiJUZEpJY2JlMTZXb1RIdE45NW55eXdoNUU0eU9vNkl0RyIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgbW9kZWwucmVhZCBtb2RlbC5yZXF1ZXN0IG9yZ2FuaXphdGlvbi5yZWFkIG9mZmxpbmVfYWNjZXNzIn0.Vx4YcreOeDevNoIXNrdig-GDVHEeRF9eulhIWvN6cjJbejiLUf2o51YYNHgiiaWo2362B6JrUkp10mnYlfetMehrzEEKFg0jSyJS4ADJ2MsCceIaTdvBFRs63S71v8JB037uRfO4hBBtGRX4M5zc1amZfN65dvd0XQNrtGxL8yANvsFKAhySEB3e1aO5aVWdT8I9ksNC2a502SRk-z3CnxGbVwMn0Wa8z0VRtn6s_rIQWjvAjRbK_cb8cx32v4poSUuvOUMNrC4opcbeLG5TDW6RDl4TQT0QVg09xGRAYq0OId8yPL46m_iDVDft5Q9iJyiCb1zXB3xg4r3s-hxrjw")
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("cookie", "_ga=GA1.2.669054835.1671078900; intercom-device-id-dgkjq2bp=7087b55f-5748-44f0-9309-f556e74bbbbc; cf_clearance=drddXGMD3PdQp6wn4JeFCEkt96R2Dg3stjjKM4yakH0-1675955023-0-1-b8a7de08.74352235.efa681e8-160; cf_clearance=oe2Y50j3d8IJ23aZjkPmxK68dOUnfDsS4MR_URgKMC8-1676130288-0-1-b8a7de08.917f4928.efa681e8-160; __Host-next-auth.csrf-token=41a3b7e4593958d711423da7847e5f227341841d2b7ea9317b047202bfe2db71%7Cd464dd81a662df019a95f32d1b4c77e7bbaf81da6795f2abf93f084d838ef13e; __Secure-next-auth.callback-url=https%3A%2F%2Fchat.openai.com; mp_d7d7628de9d5e6160010b84db960a7ee_mixpanel=%7B%22distinct_id%22%3A%20%22user-i0rb6ZwJlkUnrViWruiaxjsg%22%2C%22%24device_id%22%3A%20%2218636b3d153d3d-00eb6bcc5950d2-16525635-fa000-18636b3d154ca7%22%2C%22%24initial_referrer%22%3A%20%22https%3A%2F%2Fplatform.openai.com%2F%22%2C%22%24initial_referring_domain%22%3A%20%22platform.openai.com%22%2C%22%24search_engine%22%3A%20%22google%22%2C%22%24user_id%22%3A%20%22user-i0rb6ZwJlkUnrViWruiaxjsg%22%7D; _cfuvid=n2wZlzICU8T7YXVwetuAs8DLEnbMgX0WH8AIaLxd5Vw-1677080939895-0-604800000; __Secure-next-auth.session-token=eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..f7igd1Hgxtr_fXQ1.h3Q1cHpAdkWPGfHeCrwqfVgdWBrd3V8hQt4edHKIX6bHxN6IZ0u72s2lTsI-JN6neZSaKKI8LJEGn4AX8tZ9LbHbJFTaZWxHpHLJbqdH7fWViNBrwHnkqqNiuXi1HpeTx4q0xKggmIkLdeg3YZZXKGu_UgI2eqsVjumE8LK8FBnyNYsd5sS784BkRkIFZcDZQYkNBptU_GO8h0ItBpdrKUklSyvZKMkm3MZO9zSJdMWhxPISi1CaJB7XhoLTXu2n3mM_NglUeMAgXu6cUsfnZWKW3VN0fdjEIcr0B0mk9xrN7TH1z0lV1Tr3Wuv6c_13EPDlxhMpb3ORcpkT2k1X19rEXVxm2q5riZn9_Mn3xdWJf3DUPRZ7_CDPc2fcXwrsY0gly0aUBS1m7rFH9Rm8aZhPgqUrtm3822wQ_5KQXR6VdvNXhzlnAqk9aExBLyqH0z8g2by8dYDbqw2rUq0CYLSrRZYhs2l7HvE4VYYjYuhpnoI-cjtrHofXsP-QsLL0Z7KkIN-IpjPowv9SAJqmuDpiDkTVvGYzfdAkLJvUDkyL0yG3fnbJgP_a4PiH2W2fOe7JTBr4szBJ_4Rn7WaNeQG6_R_OdrC4sMIUkzVSU2E10EY5aRORq87tfeycw5Q3emVW8gkhe4wl-8zxjV2ByaaldhDVrfRQAKct-KKg4onK4GraixDbAYkSexqhcMzqxysuGtvfgDG3SOmUA6DFJ7Nw51o_-sZgDfeV6WsTn3AXvtohyUN7-VLnXpGy7Ck4D07ZzALSeDssCspnfOBC-pYeFJvAXGk_PXAFaddlzfzXiY-ZB5k9kJjvRhUKbk9_PzV0lVQ-2weebLzCEu7TlFh4HZhgIIcii5-HwWkkjcbDixrCgGyx4Fic-aDHRnjLOwRBTndT4lnUyR7ycdP-TueB3153sp6HCLIE_S0eoqtYEBAoc3M9PLXN4Ki57s37zGAbzTx_0NPo-94Owa15amXuAvq3iNUros1sDRLuVK61AW8wh8zv07aH-5fkWbek8Z4LneMeBAHbPhSRI007-ohc2dvOV1Vh9q3WUK_ECqk0nKnnKdK4Wie0EgyJpAMArs2CCB6Vz80AL7rKJ3k_i9zJePqVDAq5vR1iwW_Nn_IFPAI3n_RgFCX9pzCdvBnfNagmfaSpx_kM_qOo5HWX7k_7JzxacAHXGHe8IF0fOSndNQQHLnYDDRR1CIjx9gcWS7-bNl7d4b8Zf-qIFUR49L5NdCT0bQ2jlofdv3TdrMQfD7LFsmfdkZUCxB0FhxFFufVCnGCHrd2Cxc_Cm63oRuz5XU8bYl7f-VcwkYelkLoIV_aQkIOZIJ8xgJaDe5a96h2QGFMjGacNAUqa_iZChpFmb7yvzNK1SepTajCxLZ08QpiKgHwL74Rs0IHerc-THWuFT1JhOfX-v6RXWVHQO95FCut2DOxFGnEoXCczDsjDFOcCSH8tvkJ4RreS6S8-wL4j0QKBKNzQ0uKhcgyX-7MotH3jx369LnWK4ZzHMouDAkCixBXpLDDQjEix9FvYtn63k_lJayBQull1-TVKSiDMYC51B4UfJX6918L1ajqb9LoMp03S6Ej3kPkjHeu9RkBQq6I6e58v0pdVD2NMCcipJZRSvBEMH5bYd6FHWajIb0BtPGfpAIn1BoN1sd3L1HVkBNRaNZdvSWRdmMhZgMFJC17k8uWJKLoEem0uxT9yRCHkXSjSfEjHrIjr91NV43hNcrvEJTKUMFA2zAbvlmwBOQwTofLOGDH056cws8pOuBPI873uICUgsBvYSKCpExyjCT0frz2x8CcSoVRS64Mg_8OJyGkqQsjYfq2ByDRR5-tMDP8pwDZYqJgKD4HDdNw7BK0MvOLXS0Ga_MDx5HcV2Q1EjI3Ba-xrQ95TZtpPtocwbJ88x8hqLBiuOGfs1Re8owWqqtDXhaL0cvTuwthxvLtHpHjbODeGkj7SkAF6BXUQ1J3HmHl6r2J0HqNQbohk81Qdhjs_w6C2LnHPB-w_AiA982uxweQzl1o7ZDy1OwXS186yo8W9WZpAMZyuU9pr_5Sb049dlIJm5SzpGihoR0mVPIKqeFpPE0GaZrNjhqwNmt32p2YTOAdOCTYkdEdZ9_aktq6vB6z5hoOgt0D7bmtdQuagdGbwYhGHdlra0KbiW2vyJ0v67R2vDdKNhx88Hp9J6ddb1WICvogQOf0srG0U_UU68Jr2z8NFjAcGCDvFLgezThnntMIqUYOgtZbkXmu0vdGL65hlAh8B9hzHwFpr4AYI_Sm8qg5tWqfo_FfN6Dh-qoFd9wvJ6auG-_bRzjYqS2V_Zf_XhmxLuwIX81g9JmddE_2hzgUfPaCsjS3UPg2b42A1PNrKczVuOq3br6REmCy2NUfiKMH2et9C-VqJMf98RWFIJDj2eV7cpbz8vPfEacej3SHs7UkOe7-rLrkuNW5Ydk_walYiMwFQ2vcwfhtONEZw_d7mNFVG5RZiWHhfUHvjQTpvkywUVyuQAWSadGOM-w1OHBTo_gYUo4NPXIktIouFcHFGun6YKzyfFrDwHprW9E3xelcea3Qxr36Vhfkic8LOEIx9arOCT8S0ZM1FVrFCrGML2u0jEcg5hkgloTJjlRIPiih0nxtO_ITUcl2Td00mKam5xk8wOWsm8nfU0PE7ZELBs2p8sHHcdpQMX9G9rtA.jtJVPBpUS9L56F-kmNyG4A; _puid=user-Vhi28s6bVCUjW5VLwUgSfvh6:1677082143-%2FEbyhCdEn9NwXHcsTzMbIq6ZdXrcHNvzfchiX36AZbg%3D; __cf_bm=tE5g3VLoJ0SQwt.vw1dL9kh6K0yRvmvI21e42EljGVU-1677082144-0-AVyLXi5gIbk6FVV2YXkBMO8TIBWsP9tqUZE0IrLqnXFcslKBuLVHaSqLn6BDz7FkKOH4439FHV9S56iThmh6WWOwHYm4TvWNGBlLBbTLq/G/kGaxf8mlNygZpTpCzbpAECxyUNHlP987qJGSIfDbG3lRMWlD2Cw4TN/OscO8Fg5yWBAGBqCjQGZs7A2LBdLnEQ==")
+	req.Header.Set("cookie", "intercom-device-id-dgkjq2bp=7087b55f-5748-44f0-9309-f556e74bbbbc; cf_clearance=oe2Y50j3d8IJ23aZjkPmxK68dOUnfDsS4MR_URgKMC8-1676130288-0-1-b8a7de08.917f4928.efa681e8-160; mp_d7d7628de9d5e6160010b84db960a7ee_mixpanel=%7B%22distinct_id%22%3A%20%22user-i0rb6ZwJlkUnrViWruiaxjsg%22%2C%22%24device_id%22%3A%20%2218636b3d153d3d-00eb6bcc5950d2-16525635-fa000-18636b3d154ca7%22%2C%22%24initial_referrer%22%3A%20%22https%3A%2F%2Fplatform.openai.com%2F%22%2C%22%24initial_referring_domain%22%3A%20%22platform.openai.com%22%2C%22%24search_engine%22%3A%20%22google%22%2C%22%24user_id%22%3A%20%22user-i0rb6ZwJlkUnrViWruiaxjsg%22%7D; __Secure-next-auth.callback-url=https%3A%2F%2Fchat.openai.com; __Host-next-auth.csrf-token=ea020d6ca0e427c981204b139e311a723c0d0c58782e1bda2c37963c12587467%7C34632d104a2a524a49e6b57fb24265f159650da9607dc8a8e949562114e7fba8; _ga=GA1.2.669054835.1671078900; _gid=GA1.2.1478507419.1678106457; _ga_9YTZJE58M9=GS1.1.1678106434.1.1.1678106468.0.0.0; __cf_bm=fCRTK81I5iJgk9N7qAmC7tPuwC0id7GkgiZ0ttLmmP4-1678106815-0-AaobNzXm1K38Ac1kZOaNlUD92xv/hC6kIgnEsVi1do+nkMegOOuaQnDcwFzCxYWI+W4NRbZXlbvMAtfVFHKCJdfDzzckeVrMICk3FNapDn3ntupkNXWfJILMSpiZO69lDH1bUkkjV9Pk1k3AHJ9q83JTj9EIchqfqzA3csXQczZtxFxmkKy0ZsL1tBHndRPKkA==; cf_clearance=imZse0h13Ge.g3MCOyGnT0nu09.a5YCSSXhb188NslQ-1678106839-0-1-ddd5f387.680f0c7b.31e7c3d3-250; _cfuvid=tRxmEYbrp1OvqfD17XyGeA0x5qtatgQNw8NgQHuJLVs-1678108050207-0-604800000; __Secure-next-auth.session-token=eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..0HI7GHbPtFxrxaYa.3quyJMC1D9xtKZKAQukIgKhRrXiNgFcI47WTDahKhJIJXKfYyPZBbldtdr4-ay_bLKx6GtK1Utr3S2S93QOvKgw_i882D9zeq6hm8qC5FbEkFccJ6dwJjrjcpRdexTDfHPFNGawkkuxTZFvdpt0iEtkjAeTiE6tMa8WhXfHcjLuPaJFoONcj1I2r8qd1S2AkfbgcUcHw1vcnb6_unIhYFnQyd8f2Nj8_EK3R7j2hcfeeFKoafxcMRF98qz2phbAoSh_bT26cA357ZmgcjJMVncCClGjn3XmFiM9hwuR0Vam-50CgtCebeYXCJRb4cmfwpBbxBMex4FuJa465YyTyaqzGhppX72L3jW3x_InD__c12EEn0U_DbFNHKSyRooGIYVPYcH501n38VgiYXb5WWNQD1F7yJWROugCO7gvQI7zY_VNqe6wSPbbwSVlUzv3_DqrXcV8RswH5KsLh2iNSoo0B81J8ia83L9uewhAJ1AtKv4qIWbXPiqZKXxs0mbyMVjgpFfpYUU9UZ3n8Zid2hF5aKCxd3PmtYRS1l0ubhCl-fZUh6pioCxVyDeQh7DKAOs0Tll-WIBOAQljTWQVckRT6UD1xEXQBHKpJ59bsKVpCw-yPwAibYNbikb5e2nsF1nhrbJ9sQlW6fx_S6m_FFmy2uFjj7yipYL1uVEfii43WD3lxysIjrLQ_dxqza5jDKOBSBe3vDOUrWhdEtmgjAWQ3BdoJvRzWK2-P2XPb-DYMZ8B0aeaUHMJfoJTWboBj3zuep28jcWdA4ENeXAKvd0YTV0xwdTwpzWrxO7eCHLiT5qTP-PXgG1tYJSzjV1fXiAsywJ0U7Eu9qhwEQXoTd10GNcEZmHtCzkzUFN5ujyeZy7wtanQq6AvqB7vVnJLcqGH0qjuwZTIHWmy7GAudHHIO3CtlQgDWlBxJSQKo_8c8LuCTdWaLDuiVecsieZ_XikpBcb697AfSU28kv0PiRBQhBI_l7ClGzO7i0nhI-vzm0dKVjlYA9b6ewoxfxMFgNy3RVu5hwWtJDQGUYa8N78Gj0OGl6ybG3xSnrpivY6IlYjGegx6EOt8nw_jCNTZNclpQBdR_LraBfJCy-KN5QO8u7LjWMIWm7tfxRbIjs_RBPljcgxXjLlgxExqLixvvQ7DxeFZRSY_F7vtB_w_-akk1ZqJastdQPeEASOs9u7h7I8eC0oLIhDftnREdWVn31S6wn_H2MaEz2vM81O2abmw-fqfZjGagMd1ZwmHHVX1deNX5-EBKTIxm_yHIICnnpjk7mLAMio9Vrt7L87HSDqYq2Ntjdt_tAKKq0cgkBZ8jn6lyF0jE8za1QA6s_FSyN_acyw-cTM0-nHT8-4iYpiXOw5BcH5VgkiVIPjhGCccxgSM-OstZH3cZpnkhGMsfbzXhQlsoKiR-3ASEw9mtOp_cRjpXQICRiUbX1QbERus3vveTiv0PqKHaO78frDm1NODVHwNG4hYAKDxthgSupnM36ARNWTBqjxJGJtoUNoXkb66oUnWjNli1apQUxwqC1YS_DBXjrDalFIix7p6_BozJ77PghnLdj59gcu1gqtnQXRBKPvltm6vc634VwMObL3nAhc4-5BQqc24cq8px3eg5lGl78UfK30XScO7IhAw90WvHTtv7jw3SUFg_LdKHwb3yv_2U-oLPZQybBXq_y70uqTYfKpOzUmqiN9O1howcGKdZ-BEwvixobLwC5_eCyq0FquqBPIVQVqzZdSX7FEZkB1lSOqT7F1POZMKpz4Sul0-aUpE6KnqKaMSyO01JppkqvHojT_yQErjNnjgeV9Dsq4-5XQFiHWxJ5It86fO4KTXX3Cwfq785ONBMaENGniAXi-SHHMwdbxrPuDhhuvJ0ozlxVsDC9u8W2FWzoABfnFRS-bz-S9DFGimkIiBuGwOP8kMOfipLl8R9X6IPLH1h0mESfFjEECetMeAQRksF1YbgywDfqhKg3tVS4uyyv20B-DMxFYOmWrDJatSAUL6Z9a5a5q8BYhu-SOmlnvuoEFY1curXDvH3C8wnXN_Xq0nw1qGpNRpwusPXfzLauWj7itEp4PLws8pMd3t101WPjTqvy1Twe_KM9oFKFnUMGmFP1nHjyL1KVAQIR_-q86DjJOI71aZo7n3jLpDb5miv61IXHdGHjnGGoVlq4duLw7u8zSdFPN1tHU48fOnw86Hi8qKAglkIXpeovVTH4trvsvplYRWbVXEYr5forNKY6gLLZJk6cTg-QmHMQ5vlJ4x6V7ab90n1oZAXcXt5fs_zSDSOtKvYRepIC-OvDHIF4PGmEGiJfCbfM7IMQo4DpYoj2TMS1vjNMJUmcqdg5j13DiaTMdAU6tdYvQpwuD5KAqSuEBu1CpnQSNpowDpRLkKRgJ9OjKgVTeJDxAkjtqMducvJ6CWzenHpCWl1BEDLHsyxtvAKLzp3ODXB3B3nnDGOFz0tyDCt-dtGgfHyeMrqcBSiwdDfkBet5E3rc9ejsde_8manE7LiZ6hbP5gBGraEbhbRIkjzAMXOnRtHq5BoRK24iKl_5tTyC3rVYCcc9g9wcRdEFBCwzR0obhFsitxiVeQfO9MSglZc_OD4gM_axoFupiW129duIQy9UxrHWJ1dkWAkCT5Da7Ub7o5g3G0FHYH8zw48XWmRuijVJ_Q1R6rgLBaGzxKzCk0.FpnXI_GQ6kJVQ1DmGrbd1Q; _puid=user-Vhi28s6bVCUjW5VLwUgSfvh6:1678108059-qs3Gx07u7Y1%2FTr70NaCGsOm%2BCrw7OlYEyElRFgvTe5k%3D; __cf_bm=IjRnKs.jhsWPbM_8lg1EWQLdz_tbH4GNhP.d1MhpPIc-1678108093-0-AQe0h6E0z1rUY9LB9MylxOfYJ157I/PBKbTYpQ41f7AUS8FJ6h1ZnWfU/oVEpDQx6cUUn6RUt3nRxzo7IOMagTI=")
 	req.Header.Set("origin", "https://chat.openai.com")
 	req.Header.Set("referer", "https://chat.openai.com/chat?model=text-davinci-002-render-paid")
-	req.Header.Set("sec-ch-ua", `"Not_A Brand";v="99", "Google Chrome";v="109", "Chromium";v="109"`)
+	req.Header.Set("sec-ch-ua", `"Chromium";v="110", "Not A(Brand";v="24", "Google Chrome";v="110"`)
 	req.Header.Set("sec-ch-ua-mobile", "?0")
 	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
 	req.Header.Set("sec-fetch-dest", "empty")
 	req.Header.Set("sec-fetch-mode", "cors")
 	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36")
+	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
 	resp, err := client.Do(req)
 
 	if err != nil {
