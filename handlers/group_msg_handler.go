@@ -39,9 +39,18 @@ type Image struct {
 	URL string `json:"url"`
 }
 
+
+type Error struct {
+	Code    interface{} `json:"code"`
+	Message string      `json:"message"`
+	Param   interface{} `json:"param"`
+	Type    string      `json:"type"`
+}
+
 type ImageData struct {
 	Created int64    `json:"created"`
 	Data    []Image `json:"data"`
+	Error Error `json:"error"`
 }
 
 func GroupMessageContextHandler() func(ctx *openwechat.MessageContext) {
@@ -150,7 +159,8 @@ func (g *GroupMessageHandler) ReplyText() error {
 
 		len := len(imgData.Data)
 		if len <= 0 {
-			return fmt.Errorf("searchReturnImage error: %v ", bodyText)
+			g.msg.ReplyText(imgData.Error.Message)
+			return fmt.Errorf("searchReturnImage error: %v ", imgData.Error.Message)
 		}
 
 		fmt.Println(imgData.Data[0].URL)
