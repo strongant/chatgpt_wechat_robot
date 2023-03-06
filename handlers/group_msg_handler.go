@@ -312,7 +312,7 @@ func searchByKeyWords(q string) bytes.Buffer {
 
 	log.Println("search q:" + q)
 
-	fullQ := `{"action":"next","messages":[{"id":"1b91162e-e040-4436-b9b7-e1f6912b3117","author":{"role":"user"},"role":"user","content":{"content_type":"text","parts":["`+q+`"]}}],"conversation_id":"f0b4e553-5a5e-481e-bc07-bd1726f99ffd","parent_message_id":"ef90cd10-4898-4592-8f94-da1ae8a05a5d","model":"text-davinci-002-render-paid"}`
+	fullQ := `{"action":"next","messages":[{"id":"1b91162e-e040-4436-b9b7-e1f6912b3117","author":{"role":"user"},"role":"user","content":{"content_type":"text","parts":["`+q+`"]}}],"conversation_id":"f0b4e553-5a5e-481e-bc07-bd1726f99ffd","model":"text-davinci-002-render-paid"}`
 	log.Println("fullQ:" + fullQ)
 	var data = strings.NewReader(fullQ)
 	req, err := http.NewRequest("POST", "https://chat.openai.com/backend-api/conversation", data)
