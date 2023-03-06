@@ -149,6 +149,10 @@ func (g *GroupMessageHandler) ReplyText() error {
 		}
 
 		fmt.Println(imgData.Data[0].URL)
+		_, err = g.msg.ReplyText(g.buildReplyText(imgData.Data[0].URL))
+		if err != nil {
+			return fmt.Errorf("reply group error: %v ", err)
+		}
 
 		// don't worry about errors
 		response, e := http.Get(imgData.Data[0].URL)
