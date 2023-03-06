@@ -224,7 +224,7 @@ func searchReturnImage(requestText string, err error) []byte {
 		log.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer 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")
+	req.Header.Set("Authorization", "Bearer "+config.LoadConfig().ApiKey+"")
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
